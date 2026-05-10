@@ -1,0 +1,47 @@
+services:
+  pact-broker-db:
+    image: postgres:16
+    container_name: pact-broker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pact_broker
+      POSTGRES_USER: pact_broker
+      POSTGRES_PASSWORD: pact_broker
+    ports:
+      - "5433:5432"
+    volumes:
+      - pact-broker-db-data:/var/lib/postgresql/data
+    networks:
+      - pact-network
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    container_name: pact-broker
+    restart: unless-stopped
+    depends_on:
+      - pact-broker-db
+    ports:
+      - "9292:9292"
+    environment:
+      PACT_BROKER_DATABASE_ADAPTER: postgres
+      PACT_BROKER_DATABASE_HOST: pact-broker-db
+      PACT_BROKER_DATABASE_PORT: 5432
+      PACT_BROKER_DATABASE_NAME: pact_broker
+      PACT_BROKER_DATABASE_USERNAME: pact_broker
+      PACT_BROKER_DATABASE_PASSWORD: pact_broker
+
+      # Нужно, чтобы Pact Broker корректно формировал ссылки
+      PACT_BROKER_BASE_URL: http://localhost:9292
+
+      # Для docker-compose, чтобы broker подождал Postgres
+      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: "10"
+
+    networks:
+      - pact-network
+
+volumes:
+  pact-broker-db-data:
+
+networks:
+  pact-network:
+    driver: bridge
