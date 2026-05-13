@@ -1,4 +1,12 @@
 services:
+  
+  zookeeper:
+    image: zookeeper:3.9
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+      
+    restart: unless-stopped
   pact-broker-db:
     image: postgres:16
     container_name: pact-broker-db
