@@ -72,7 +72,7 @@ message RateResponse {
 - JDK 21
 - Maven или Maven Wrapper из модулей проекта
 - Docker и Docker Compose
-- Bash для `start.bash`, `currency-rate-provider/start.sh` и `currency-rate-provider/kill.sh`
+- Bash для `start.bash`, `build.sh`, `release.sh`, `start.sh` и `currency-rate-provider/kill.sh`
 
 На Windows можно запускать сборку через `mvnw.cmd`, на Linux/macOS через `./mvnw`.
 
@@ -104,13 +104,68 @@ docker compose down
 docker compose down -v
 ```
 
-## Запуск сервисов
+## Сборка, релиз и выполнение
 
-Сначала запустите `currency-rate-provider`:
+В проекте стадии разделены:
+
+- `build.sh` - только собирает jar-артефакт;
+- `release.sh` - только готовит release-каталог из уже собранного jar и конфигурации;
+- `start.sh` - только запускает уже готовый jar, без сборки.
+
+### Build
+
+Собрать provider:
 
 ```bash
 cd currency-rate-provider
-./mvnw spring-boot:run
+./build.sh
+```
+
+Собрать client:
+
+```bash
+cd rate-printer
+./build.sh
+```
+
+### Release
+
+Подготовить release provider:
+
+```bash
+cd currency-rate-provider
+./release.sh 0.0.1-SNAPSHOT
+```
+
+Подготовить release client:
+
+```bash
+cd rate-printer
+./release.sh 0.0.1-SNAPSHOT
+```
+
+Release-каталог содержит jar и копию `application.properties`. Скрипт release не запускает приложение и не выполняет сборку.
+
+### Run
+
+`start.sh` запускает готовый jar. По умолчанию используется jar из `target`, но можно передать release-артефакт через переменную `JAR`. Если рядом с jar лежит `application.properties`, скрипт подключит его как внешний Spring Boot config:
+
+```bash
+JAR=release/0.0.1-SNAPSHOT/currency-rate-provider.jar ./start.sh
+```
+
+```bash
+JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
+```
+
+## Запуск сервисов
+
+Сначала соберите и запустите `currency-rate-provider`:
+
+```bash
+cd currency-rate-provider
+./build.sh
+./start.sh
 ```
 
 По умолчанию provider использует:
@@ -120,11 +175,12 @@ cd currency-rate-provider
 - ZooKeeper: `localhost:2181`
 - service path в ZooKeeper: `/services`
 
-Затем запустите `rate-printer`:
+Затем соберите и запустите `rate-printer`:
 
 ```bash
 cd rate-printer
-./mvnw spring-boot:run
+./build.sh
+./start.sh
 ```
 
 Клиент каждые 5 секунд выбирает provider и печатает результат:
@@ -143,7 +199,7 @@ cd currency-rate-provider
 ./start.sh
 ```
 
-Скрипт собирает jar и запускает:
+Скрипт запускает уже собранный jar. Если jar отсутствует, он завершится с ошибкой и попросит сначала выполнить `./build.sh`.
 
 - gRPC `9090`, Actuator `8081`, лог `producer-9090.log`
 - gRPC `9091`, Actuator `8082`, лог `producer-9091.log`
@@ -160,7 +216,7 @@ cd currency-rate-provider
 
 Логи пишутся стандартным Spring Boot логгером.
 
-При запуске через `spring-boot:run` они выводятся в терминал. При запуске provider через `currency-rate-provider/start.sh` stdout/stderr каждого provider-инстанса пишутся в файлы `producer-9090.log`, `producer-9091.log`, `producer-9092.log`.
+При запуске через `start.sh` логи client выводятся в терминал, а stdout/stderr каждого provider-инстанса пишутся в файлы `producer-9090.log`, `producer-9091.log`, `producer-9092.log`.
 
 ### Сервер
 
@@ -256,18 +312,18 @@ http://localhost:9292
 
 ## Тесты и сборка
 
-Собрать provider без запуска тестов:
+Собрать provider без запуска приложения:
 
 ```bash
 cd currency-rate-provider
-./mvnw -q -DskipTests compile
+./build.sh
 ```
 
-Собрать client без запуска тестов:
+Собрать client без запуска приложения:
 
 ```bash
 cd rate-printer
-./mvnw -q -DskipTests compile
+./build.sh
 ```
 
 Запустить обычные тесты:
@@ -328,12 +384,18 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/main/java/.../service
 │   ├── src/main/java/.../zookeeper
 │   ├── src/main/proto/rate.proto
-│   └── src/test/java/.../pact
+│   ├── src/test/java/.../pact
+│   ├── build.sh
+│   ├── release.sh
+│   └── start.sh
 ├── rate-printer
 │   ├── src/main/java/.../discovery
 │   ├── src/main/java/.../service
 │   ├── src/main/proto/rate.proto
-│   └── src/test/java/.../pact
+│   ├── src/test/java/.../pact
+│   ├── build.sh
+│   ├── release.sh
+│   └── start.sh
 ├── infra
 │   ├── prometheus
 │   └── grafana
