@@ -72,7 +72,7 @@ message RateResponse {
 - JDK 21
 - Maven или Maven Wrapper из модулей проекта
 - Docker и Docker Compose
-- Bash для `start.bash`, `build.sh`, `release.sh`, `start.sh` и `currency-rate-provider/kill.sh`
+- Bash для `start.bash`, `build.sh`, `release.sh`, `start.sh` и `kill.sh`
 
 На Windows можно запускать сборку через `mvnw.cmd`, на Linux/macOS через `./mvnw`.
 
@@ -211,6 +211,31 @@ cd currency-rate-provider
 cd currency-rate-provider
 ./kill.sh
 ```
+
+Остановить client-процесс:
+
+```bash
+cd rate-printer
+./kill.sh
+```
+
+## Одноразовость и graceful shutdown
+
+Приложения корректно обрабатывают `SIGTERM` и завершаются с ожиданием активной работы:
+
+- `currency-rate-provider` использует `spring.grpc.server.shutdown-grace-period=30s`, поэтому gRPC-сервер при остановке ждет завершения текущих RPC до 30 секунд.
+- Оба сервиса используют `server.shutdown=graceful` и `spring.lifecycle.timeout-per-shutdown-phase=30s`.
+- `rate-printer` использует `spring.task.scheduling.shutdown.await-termination=true`, поэтому при остановке Spring ждет завершения текущей scheduled-задачи до 30 секунд.
+- `kill.sh` сначала отправляет `SIGTERM`, ждет graceful shutdown до 35 секунд и только после таймаута отправляет `SIGKILL`.
+
+Ключевой сценарий для IX пункта:
+
+```bash
+cd currency-rate-provider
+./kill.sh
+```
+
+Скрипт не считает процесс остановленным сразу после сигнала, а дожидается фактического завершения Java-процессов.
 
 ## Логгирование
 
@@ -361,6 +386,9 @@ spring.application.name=currency-rate-provider
 app.version=0.0.1-SNAPSHOT
 server.port=8081
 spring.grpc.server.port=9090
+spring.grpc.server.shutdown-grace-period=30s
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
 zookeeper.connect-string=localhost:2181
 zookeeper.service-path=/services
 ```
@@ -371,6 +399,10 @@ zookeeper.service-path=/services
 spring.application.name=rate-printer
 app.version=0.0.1-SNAPSHOT
 server.port=8080
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
+spring.task.scheduling.shutdown.await-termination=true
+spring.task.scheduling.shutdown.await-termination-period=30s
 spring.cloud.zookeeper.connect-string=localhost:2181
 spring.cloud.zookeeper.discovery.enabled=true
 ```
@@ -387,7 +419,8 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/test/java/.../pact
 │   ├── build.sh
 │   ├── release.sh
-│   └── start.sh
+│   ├── start.sh
+│   └── kill.sh
 ├── rate-printer
 │   ├── src/main/java/.../discovery
 │   ├── src/main/java/.../service
@@ -395,7 +428,8 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/test/java/.../pact
 │   ├── build.sh
 │   ├── release.sh
-│   └── start.sh
+│   ├── start.sh
+│   └── kill.sh
 ├── infra
 │   ├── prometheus
 │   └── grafana
