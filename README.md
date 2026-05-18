@@ -72,7 +72,7 @@ message RateResponse {
 - JDK 21
 - Maven или Maven Wrapper из модулей проекта
 - Docker и Docker Compose
-- Bash для `start.bash`, `currency-rate-provider/start.sh` и `currency-rate-provider/kill.sh`
+- Bash для `start.bash`, `build.sh`, `release.sh`, `start.sh` и `kill.sh`
 
 На Windows можно запускать сборку через `mvnw.cmd`, на Linux/macOS через `./mvnw`.
 
@@ -104,27 +104,144 @@ docker compose down
 docker compose down -v
 ```
 
-## Запуск сервисов
+## Сборка, релиз и выполнение
 
-Сначала запустите `currency-rate-provider`:
+В проекте стадии разделены:
+
+- `build.sh` - только собирает jar-артефакт;
+- `release.sh` - только готовит release-каталог из уже собранного jar и конфигурации;
+- `start.sh` - только запускает уже готовый jar, без сборки.
+
+### Build
+
+Собрать provider:
 
 ```bash
 cd currency-rate-provider
-./mvnw spring-boot:run
+./build.sh
 ```
 
-По умолчанию provider использует:
+Собрать client:
+
+```bash
+cd rate-printer
+./build.sh
+```
+
+### Release
+
+Подготовить release provider:
+
+```bash
+cd currency-rate-provider
+./release.sh 0.0.1-SNAPSHOT
+```
+
+Подготовить release client:
+
+```bash
+cd rate-printer
+./release.sh 0.0.1-SNAPSHOT
+```
+
+Release-каталог содержит jar, `application*.properties` и env-файлы. Скрипт release не запускает приложение и не выполняет сборку.
+
+### Run
+
+`start.sh` запускает готовый jar. По умолчанию используется jar из `target`, профиль `dev` и файл окружения `.env.dev`. Для production передайте `ENV_FILE=.env.prod`.
+
+Если рядом с jar лежат `application*.properties`, скрипт подключит их как внешний Spring Boot config:
+
+```bash
+ENV_FILE=.env.dev ./start.sh
+```
+
+```bash
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/currency-rate-provider.jar ./start.sh
+```
+
+```bash
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
+```
+
+## Паритет dev/prod
+
+Для X пункта окружения разработки и production разделены конфигурацией, но используют один и тот же код, jar и start-скрипты:
+
+- общий `application.properties` содержит настройки, не зависящие от окружения;
+- `application-dev.properties` и `application-prod.properties` содержат значения, зависящие от окружения;
+- `.env.dev` и `.env.prod` задают одинаковые по смыслу переменные окружения;
+- окружение выбирается через `SPRING_PROFILES_ACTIVE`.
+
+Dev-запуск:
+
+```bash
+cd currency-rate-provider
+ENV_FILE=.env.dev ./start.sh
+```
+
+```bash
+cd rate-printer
+ENV_FILE=.env.dev ./start.sh
+```
+
+Production-запуск использует тот же jar и тот же `start.sh`, но другой env-файл:
+
+```bash
+cd currency-rate-provider
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/currency-rate-provider.jar ./start.sh
+```
+
+```bash
+cd rate-printer
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
+```
+
+Ключевые переменные provider:
+
+```text
+SPRING_PROFILES_ACTIVE
+APP_VERSION
+ZOOKEEPER_CONNECT_STRING
+ZOOKEEPER_SERVICE_PATH
+PROVIDER_INSTANCES
+```
+
+`PROVIDER_INSTANCES` задает пары `grpcPort:httpPort`, например `9090:8081 9091:8082`.
+
+Ключевые переменные client:
+
+```text
+SPRING_PROFILES_ACTIVE
+APP_VERSION
+HTTP_PORT
+ZOOKEEPER_CONNECT_STRING
+ZOOKEEPER_SERVICE_PATH
+```
+
+## Запуск сервисов
+
+Сначала соберите и запустите `currency-rate-provider`:
+
+```bash
+cd currency-rate-provider
+./build.sh
+./start.sh
+```
+
+В dev-профиле provider по умолчанию использует:
 
 - gRPC-порт: `9090`
 - HTTP/Actuator-порт: `8081`
 - ZooKeeper: `localhost:2181`
 - service path в ZooKeeper: `/services`
 
-Затем запустите `rate-printer`:
+Затем соберите и запустите `rate-printer`:
 
 ```bash
 cd rate-printer
-./mvnw spring-boot:run
+./build.sh
+./start.sh
 ```
 
 Клиент каждые 5 секунд выбирает provider и печатает результат:
@@ -143,11 +260,13 @@ cd currency-rate-provider
 ./start.sh
 ```
 
-Скрипт собирает jar и запускает:
+Скрипт запускает уже собранный jar. Если jar отсутствует, он завершится с ошибкой и попросит сначала выполнить `./build.sh`.
 
-- gRPC `9090`, Actuator `8081`, лог `producer-9090.log`
-- gRPC `9091`, Actuator `8082`, лог `producer-9091.log`
-- gRPC `9092`, Actuator `8083`, лог `producer-9092.log`
+- gRPC `9090`, Actuator `8081`
+- gRPC `9091`, Actuator `8082`
+- gRPC `9092`, Actuator `8083`
+
+Список инстансов задается в `currency-rate-provider/.env.dev` через `PROVIDER_INSTANCES`. В `currency-rate-provider/.env.prod` по умолчанию настроен один provider-инстанс `9090:8081`.
 
 Остановить provider-процессы:
 
@@ -156,11 +275,36 @@ cd currency-rate-provider
 ./kill.sh
 ```
 
+Остановить client-процесс:
+
+```bash
+cd rate-printer
+./kill.sh
+```
+
+## Одноразовость и graceful shutdown
+
+Приложения корректно обрабатывают `SIGTERM` и завершаются с ожиданием активной работы:
+
+- `currency-rate-provider` использует `spring.grpc.server.shutdown-grace-period=30s`, поэтому gRPC-сервер при остановке ждет завершения текущих RPC до 30 секунд.
+- Оба сервиса используют `server.shutdown=graceful` и `spring.lifecycle.timeout-per-shutdown-phase=30s`.
+- `rate-printer` использует `spring.task.scheduling.shutdown.await-termination=true`, поэтому при остановке Spring ждет завершения текущей scheduled-задачи до 30 секунд.
+- `kill.sh` сначала отправляет `SIGTERM`, ждет graceful shutdown до 35 секунд и только после таймаута отправляет `SIGKILL`.
+
+Ключевой сценарий для IX пункта:
+
+```bash
+cd currency-rate-provider
+./kill.sh
+```
+
+Скрипт не считает процесс остановленным сразу после сигнала, а дожидается фактического завершения Java-процессов.
+
 ## Логгирование
 
-Логи пишутся стандартным Spring Boot логгером.
+Логи рассматриваются как поток событий и пишутся стандартным Spring Boot логгером в stdout/stderr.
 
-При запуске через `spring-boot:run` они выводятся в терминал. При запуске provider через `currency-rate-provider/start.sh` stdout/stderr каждого provider-инстанса пишутся в файлы `producer-9090.log`, `producer-9091.log`, `producer-9092.log`.
+При запуске через `start.sh` и client, и provider-инстансы пишут логи в stdout/stderr текущего процесса. Приложение не раскладывает логи по файлам; в production их должен забирать внешний рантайм или лог-агрегатор, например `docker logs`, journald, Kubernetes logging или Prometheus/Loki stack.
 
 ### Сервер
 
@@ -200,10 +344,10 @@ Received rate response: target=127.0.0.1:9090, pair=USDRUB, rate=91.23, timestam
 Application started: name=rate-printer, version=0.0.1-SNAPSHOT
 ```
 
-Версия задается в `application.properties` каждого сервиса:
+Версия задается через переменную `APP_VERSION` в `.env.dev` или `.env.prod`, а общий `application.properties` читает ее как `app.version`:
 
 ```properties
-app.version=0.0.1-SNAPSHOT
+app.version=${APP_VERSION:0.0.1-SNAPSHOT}
 ```
 
 ## Мониторинг
@@ -212,7 +356,7 @@ app.version=0.0.1-SNAPSHOT
 
 - `rate-printer`: `http://localhost:8080/actuator/prometheus`
 - `currency-rate-provider` по умолчанию: `http://localhost:8081/actuator/prometheus`
-- provider-инстансы из `start.sh`: `8081`, `8082`, `8083`
+- provider-инстансы из dev-профиля `start.sh`: `8081`, `8082`, `8083`
 
 Prometheus читает цели из `infra/prometheus/prometheus.yml`.
 
@@ -256,18 +400,18 @@ http://localhost:9292
 
 ## Тесты и сборка
 
-Собрать provider без запуска тестов:
+Собрать provider без запуска приложения:
 
 ```bash
 cd currency-rate-provider
-./mvnw -q -DskipTests compile
+./build.sh
 ```
 
-Собрать client без запуска тестов:
+Собрать client без запуска приложения:
 
 ```bash
 cd rate-printer
-./mvnw -q -DskipTests compile
+./build.sh
 ```
 
 Запустить обычные тесты:
@@ -302,21 +446,102 @@ cd currency-rate-provider
 
 ```properties
 spring.application.name=currency-rate-provider
-app.version=0.0.1-SNAPSHOT
-server.port=8081
-spring.grpc.server.port=9090
-zookeeper.connect-string=localhost:2181
-zookeeper.service-path=/services
+spring.profiles.default=dev
+app.version=${APP_VERSION:0.0.1-SNAPSHOT}
+spring.grpc.server.shutdown-grace-period=30s
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
+```
+
+`currency-rate-provider/src/main/resources/application-dev.properties`:
+
+```properties
+server.port=${HTTP_PORT:8081}
+spring.grpc.server.port=${GRPC_PORT:9090}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH:/services}
+```
+
+`currency-rate-provider/src/main/resources/application-prod.properties`:
+
+```properties
+server.port=${HTTP_PORT}
+spring.grpc.server.port=${GRPC_PORT}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH}
+```
+
+При запуске provider через `start.sh` фактические `server.port` и `spring.grpc.server.port` передаются аргументами командной строки из `PROVIDER_INSTANCES`. Переменные `HTTP_PORT` и `GRPC_PORT` нужны для прямого запуска jar без `start.sh`.
+
+`currency-rate-provider/.env.dev`:
+
+```text
+SPRING_PROFILES_ACTIVE=dev
+APP_VERSION=0.0.1-SNAPSHOT
+ZOOKEEPER_CONNECT_STRING=localhost:2181
+ZOOKEEPER_SERVICE_PATH=/services
+PROVIDER_INSTANCES="9090:8081 9091:8082 9092:8083"
+```
+
+`currency-rate-provider/.env.prod`:
+
+```text
+SPRING_PROFILES_ACTIVE=prod
+APP_VERSION=0.0.1-SNAPSHOT
+ZOOKEEPER_CONNECT_STRING=zookeeper:2181
+ZOOKEEPER_SERVICE_PATH=/services
+PROVIDER_INSTANCES="9090:8081"
 ```
 
 `rate-printer/src/main/resources/application.properties`:
 
 ```properties
 spring.application.name=rate-printer
-app.version=0.0.1-SNAPSHOT
-server.port=8080
-spring.cloud.zookeeper.connect-string=localhost:2181
+spring.profiles.default=dev
+app.version=${APP_VERSION:0.0.1-SNAPSHOT}
+server.shutdown=graceful
+spring.lifecycle.timeout-per-shutdown-phase=30s
+spring.task.scheduling.shutdown.await-termination=true
+spring.task.scheduling.shutdown.await-termination-period=30s
 spring.cloud.zookeeper.discovery.enabled=true
+```
+
+`rate-printer/src/main/resources/application-dev.properties`:
+
+```properties
+server.port=${HTTP_PORT:8080}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH:/services}
+spring.cloud.zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+```
+
+`rate-printer/src/main/resources/application-prod.properties`:
+
+```properties
+server.port=${HTTP_PORT}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH}
+spring.cloud.zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
+```
+
+`rate-printer/.env.dev`:
+
+```text
+SPRING_PROFILES_ACTIVE=dev
+APP_VERSION=0.0.1-SNAPSHOT
+HTTP_PORT=8080
+ZOOKEEPER_CONNECT_STRING=localhost:2181
+ZOOKEEPER_SERVICE_PATH=/services
+```
+
+`rate-printer/.env.prod`:
+
+```text
+SPRING_PROFILES_ACTIVE=prod
+APP_VERSION=0.0.1-SNAPSHOT
+HTTP_PORT=8080
+ZOOKEEPER_CONNECT_STRING=zookeeper:2181
+ZOOKEEPER_SERVICE_PATH=/services
 ```
 
 ## Структура каталогов
@@ -328,12 +553,28 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/main/java/.../service
 │   ├── src/main/java/.../zookeeper
 │   ├── src/main/proto/rate.proto
-│   └── src/test/java/.../pact
+│   ├── src/main/resources/application-dev.properties
+│   ├── src/main/resources/application-prod.properties
+│   ├── src/test/java/.../pact
+│   ├── .env.dev
+│   ├── .env.prod
+│   ├── build.sh
+│   ├── release.sh
+│   ├── start.sh
+│   └── kill.sh
 ├── rate-printer
 │   ├── src/main/java/.../discovery
 │   ├── src/main/java/.../service
 │   ├── src/main/proto/rate.proto
-│   └── src/test/java/.../pact
+│   ├── src/main/resources/application-dev.properties
+│   ├── src/main/resources/application-prod.properties
+│   ├── src/test/java/.../pact
+│   ├── .env.dev
+│   ├── .env.prod
+│   ├── build.sh
+│   ├── release.sh
+│   ├── start.sh
+│   └── kill.sh
 ├── infra
 │   ├── prometheus
 │   └── grafana
@@ -344,11 +585,11 @@ spring.cloud.zookeeper.discovery.enabled=true
 
 ## Полезные команды
 
-Посмотреть логи provider-инстанса:
+Посмотреть поток логов provider-инстансов:
 
 ```bash
 cd currency-rate-provider
-tail -f producer-9090.log
+./start.sh
 ```
 
 Перезапустить Prometheus после изменения targets:

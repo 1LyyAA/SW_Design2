@@ -1,17 +1,17 @@
 #!/bin/bash
 set -e
 
-PATTERN="currency-rate-provider-0.0.1-SNAPSHOT.jar|currency-rate-provider.jar"
+PATTERN="rate-printer-0.0.1-SNAPSHOT.jar|rate-printer.jar"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-35}"
 
 mapfile -t PIDS < <(pgrep -f "$PATTERN" || true)
 
 if [ "${#PIDS[@]}" -eq 0 ]; then
-  echo "No currency-rate-provider processes found"
+  echo "No rate-printer processes found"
   exit 0
 fi
 
-echo "Sending SIGTERM to currency-rate-provider processes: ${PIDS[*]}"
+echo "Sending SIGTERM to rate-printer processes: ${PIDS[*]}"
 kill -TERM "${PIDS[@]}"
 
 deadline=$((SECONDS + TIMEOUT_SECONDS))
@@ -24,7 +24,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   done
 
   if [ "${#running[@]}" -eq 0 ]; then
-    echo "All producers stopped gracefully"
+    echo "rate-printer stopped gracefully"
     exit 0
   fi
 

@@ -2,7 +2,7 @@ package com.example.rate_printer.discovery;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.curator.framework.CuratorFramework;
-import org.apache.zookeeper.data.Stat;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -15,17 +15,18 @@ public class ProducerDiscoveryService {
 
     private final CuratorFramework client;
 
-    private static final String SERVICE_PATH = "/services";
+    @Value("${zookeeper.service-path}")
+    private String servicePath;
 
     public List<String> getProducerInstances() {
         try {
             List<String> instances = new ArrayList<>();
 
             // получаем список нод
-            List<String> children = client.getChildren().forPath(SERVICE_PATH);
+            List<String> children = client.getChildren().forPath(servicePath);
 
             for (String child : children) {
-                String fullPath = SERVICE_PATH + "/" + child;
+                String fullPath = servicePath + "/" + child;
 
                 // читаем данные (host:port)
                 byte[] data = client.getData().forPath(fullPath);
