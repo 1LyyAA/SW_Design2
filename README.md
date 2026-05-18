@@ -144,19 +144,68 @@ cd rate-printer
 ./release.sh 0.0.1-SNAPSHOT
 ```
 
-Release-каталог содержит jar и копию `application.properties`. Скрипт release не запускает приложение и не выполняет сборку.
+Release-каталог содержит jar, `application*.properties` и env-файлы. Скрипт release не запускает приложение и не выполняет сборку.
 
 ### Run
 
-`start.sh` запускает готовый jar. По умолчанию используется jar из `target`, но можно передать release-артефакт через переменную `JAR`. Если рядом с jar лежит `application.properties`, скрипт подключит его как внешний Spring Boot config:
+`start.sh` запускает готовый jar. По умолчанию используется jar из `target`, профиль `dev` и файл окружения `.env.dev`. Для production передайте `ENV_FILE=.env.prod`.
+
+Если рядом с jar лежат `application*.properties`, скрипт подключит их как внешний Spring Boot config:
 
 ```bash
-JAR=release/0.0.1-SNAPSHOT/currency-rate-provider.jar ./start.sh
+ENV_FILE=.env.dev ./start.sh
 ```
 
 ```bash
-JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
 ```
+
+## Паритет dev/prod
+
+Для X пункта окружения разработки и production разделены конфигурацией, но используют один и тот же код, jar и start-скрипты:
+
+- общий `application.properties` содержит настройки, не зависящие от окружения;
+- `application-dev.properties` и `application-prod.properties` содержат значения, зависящие от окружения;
+- `.env.dev` и `.env.prod` задают одинаковые по смыслу переменные окружения;
+- окружение выбирается через `SPRING_PROFILES_ACTIVE`.
+
+Dev-запуск:
+
+```bash
+cd currency-rate-provider
+ENV_FILE=.env.dev ./start.sh
+```
+
+```bash
+cd rate-printer
+ENV_FILE=.env.dev ./start.sh
+```
+
+Production-запуск использует тот же jar и тот же `start.sh`, но другой env-файл:
+
+```bash
+cd currency-rate-provider
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/currency-rate-provider.jar ./start.sh
+```
+
+```bash
+cd rate-printer
+ENV_FILE=.env.prod JAR=release/0.0.1-SNAPSHOT/rate-printer.jar ./start.sh
+```
+
+Ключевые переменные:
+
+```text
+SPRING_PROFILES_ACTIVE
+APP_VERSION
+HTTP_PORT
+GRPC_PORT
+ZOOKEEPER_CONNECT_STRING
+ZOOKEEPER_SERVICE_PATH
+PROVIDER_INSTANCES
+```
+
+У `rate-printer` нет `GRPC_PORT` и `PROVIDER_INSTANCES`, потому что он не поднимает gRPC-сервер и не запускает provider-инстансы.
 
 ## Запуск сервисов
 
@@ -383,28 +432,60 @@ cd currency-rate-provider
 
 ```properties
 spring.application.name=currency-rate-provider
-app.version=0.0.1-SNAPSHOT
-server.port=8081
-spring.grpc.server.port=9090
+spring.profiles.default=dev
+app.version=${APP_VERSION:0.0.1-SNAPSHOT}
 spring.grpc.server.shutdown-grace-period=30s
 server.shutdown=graceful
 spring.lifecycle.timeout-per-shutdown-phase=30s
-zookeeper.connect-string=localhost:2181
-zookeeper.service-path=/services
+```
+
+`currency-rate-provider/src/main/resources/application-dev.properties`:
+
+```properties
+server.port=${HTTP_PORT:8081}
+spring.grpc.server.port=${GRPC_PORT:9090}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH:/services}
+```
+
+`currency-rate-provider/src/main/resources/application-prod.properties`:
+
+```properties
+server.port=${HTTP_PORT}
+spring.grpc.server.port=${GRPC_PORT}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH}
 ```
 
 `rate-printer/src/main/resources/application.properties`:
 
 ```properties
 spring.application.name=rate-printer
-app.version=0.0.1-SNAPSHOT
-server.port=8080
+spring.profiles.default=dev
+app.version=${APP_VERSION:0.0.1-SNAPSHOT}
 server.shutdown=graceful
 spring.lifecycle.timeout-per-shutdown-phase=30s
 spring.task.scheduling.shutdown.await-termination=true
 spring.task.scheduling.shutdown.await-termination-period=30s
-spring.cloud.zookeeper.connect-string=localhost:2181
 spring.cloud.zookeeper.discovery.enabled=true
+```
+
+`rate-printer/src/main/resources/application-dev.properties`:
+
+```properties
+server.port=${HTTP_PORT:8080}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH:/services}
+spring.cloud.zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING:localhost:2181}
+```
+
+`rate-printer/src/main/resources/application-prod.properties`:
+
+```properties
+server.port=${HTTP_PORT}
+zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
+zookeeper.service-path=${ZOOKEEPER_SERVICE_PATH}
+spring.cloud.zookeeper.connect-string=${ZOOKEEPER_CONNECT_STRING}
 ```
 
 ## Структура каталогов
@@ -416,7 +497,11 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/main/java/.../service
 │   ├── src/main/java/.../zookeeper
 │   ├── src/main/proto/rate.proto
+│   ├── src/main/resources/application-dev.properties
+│   ├── src/main/resources/application-prod.properties
 │   ├── src/test/java/.../pact
+│   ├── .env.dev
+│   ├── .env.prod
 │   ├── build.sh
 │   ├── release.sh
 │   ├── start.sh
@@ -425,7 +510,11 @@ spring.cloud.zookeeper.discovery.enabled=true
 │   ├── src/main/java/.../discovery
 │   ├── src/main/java/.../service
 │   ├── src/main/proto/rate.proto
+│   ├── src/main/resources/application-dev.properties
+│   ├── src/main/resources/application-prod.properties
 │   ├── src/test/java/.../pact
+│   ├── .env.dev
+│   ├── .env.prod
 │   ├── build.sh
 │   ├── release.sh
 │   ├── start.sh

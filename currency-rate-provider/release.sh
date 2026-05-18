@@ -14,7 +14,8 @@ fi
 
 mkdir -p "$RELEASE_DIR"
 cp "$BUILD_JAR" "$RELEASE_JAR"
-cp "src/main/resources/application.properties" "$RELEASE_DIR/application.properties"
+cp src/main/resources/application*.properties "$RELEASE_DIR/"
+cp .env.dev .env.prod "$RELEASE_DIR/"
 
 echo "Release prepared: $RELEASE_DIR"
-echo "Run it with: JAR=$RELEASE_JAR ./start.sh"
+echo "Run it with: ENV_FILE=$RELEASE_DIR/.env.prod JAR=$RELEASE_JAR ./start.sh"
