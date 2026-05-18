@@ -30,7 +30,7 @@ echo "Spring profile: ${SPRING_PROFILES_ACTIVE:-dev}"
 for instance in $PROVIDER_INSTANCES; do
   grpc_port="${instance%%:*}"
   http_port="${instance##*:}"
-  java -jar "$JAR" "${CONFIG_ARGS[@]}" --spring.grpc.server.port="$grpc_port" --server.port="$http_port" > "producer-$grpc_port.log" 2>&1 &
+  java -Dprovider.instance="grpc-$grpc_port" -jar "$JAR" "${CONFIG_ARGS[@]}" --spring.grpc.server.port="$grpc_port" --server.port="$http_port" &
   echo "Started producer on gRPC $grpc_port, metrics http://localhost:$http_port/actuator/prometheus, PID=$!"
 done
 
