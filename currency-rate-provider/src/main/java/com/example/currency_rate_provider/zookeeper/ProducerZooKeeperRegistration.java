@@ -4,6 +4,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.zookeeper.CreateMode;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -14,6 +15,7 @@ import java.net.InetAddress;
 
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "zookeeper.registration.enabled", havingValue = "true", matchIfMissing = true)
 public class ProducerZooKeeperRegistration {
 
     private final CuratorFramework client;
